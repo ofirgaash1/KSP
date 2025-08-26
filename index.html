@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KSP - מוצרים בהנחה</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+        }
+
+        header {
+            background: linear-gradient(135deg, #0066cc 0%, #003366 100%);
+            color: white;
+            padding: 1rem;
+            text-align: center;
+            font-size: 1.2rem;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        .input-box {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .fetch-btn {
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 1rem;
+        }
+
+        .progress {
+            margin: 1rem 0;
+            font-size: 0.9rem;
+            color: #333;
+        }
+
+        .products-grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 0.5rem;
+        }
+
+        .product-card {
+            background-color: white;
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            padding: 0.5rem;
+            font-size: 0.85rem;
+            transition: transform 0.2s ease;
+            cursor: pointer;
+        }
+
+        .product-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .product-image {
+            width: 100%;
+            height: 120px;
+            object-fit: contain;
+            margin-bottom: 0.3rem;
+            background: #fafafa;
+        }
+
+        .product-name {
+            font-weight: bold;
+            margin-bottom: 0.3rem;
+            height: 35px;
+            overflow: hidden;
+        }
+
+        .product-price {
+            font-size: 0.9rem;
+        }
+
+        .old-price {
+            text-decoration: line-through;
+            color: #999;
+        }
+
+        .new-price {
+            color: #d32f2f;
+            font-weight: bold;
+            margin-right: 5px;
+        }
+
+        .discount {
+            display: block;
+            color: green;
+            font-weight: bold;
+            margin-top: 0.2rem;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            font-size: 1.1rem;
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+    <header>🎉 מציג מוצרים בהנחה מ־KSP 🎉</header>
+    <div class="container">
+        <textarea id="urlsInput" class="input-box" rows="4"
+            placeholder="הדבק כאן לינק/ים מ־ksp.co.il/web/cat/... (כל URL בשורה חדשה)"></textarea>
+        <button id="fetchBtn" class="fetch-btn">טען מוצרים</button>
+        <div id="progress" class="progress"></div>
+        <div id="productsContainer" class="products-grid"></div>
+    </div>
+
+    <script>
+        const fetchBtn = document.getElementById("fetchBtn");
+        const urlsInput = document.getElementById("urlsInput");
+        const progressDiv = document.getElementById("progress");
+        const productsContainer = document.getElementById("productsContainer");
+
+        // Restore saved URLs
+        document.addEventListener("DOMContentLoaded", () => {
+            const saved = localStorage.getItem("kspUrls");
+            if (saved) urlsInput.value = saved;
+        });
+
+        fetchBtn.addEventListener("click", () => {
+            const urls = urlsInput.value.split("\n").map(u => u.trim()).filter(u => u);
+            if (urls.length === 0) {
+                alert("אנא הזן לפחות לינק אחד");
+                return;
+            }
+            localStorage.setItem("kspUrls", urls.join("\n")); // save to local storage
+            fetchAllDiscountedProducts(urls);
+        });
+
+        async function fetchAllDiscountedProducts(urls) {
+            productsContainer.innerHTML = '<div class="loading">טוען מוצרים...</div>';
+            progressDiv.textContent = "";
+
+            const productsByUin = new Map();
+            let totalPagesFetched = 0;
+
+            for (const url of urls) {
+                const apiBase = convertToApiUrl(url);
+                let page = 1;
+                let hasMore = true;
+
+                while (hasMore) {
+                    progressDiv.textContent = `טוען ${url} עמוד ${page}... (סה"כ עמודים שנמשכו: ${++totalPagesFetched})`;
+
+                    try {
+                        const response = await fetch(`http://localhost:3000/api/proxy?target=${encodeURIComponent(apiBase + page)}`);
+                        const data = await response.json();
+
+                        if (!data.result || !data.result.items || data.result.items.length === 0) {
+                            hasMore = false;
+                            break;
+                        }
+
+                        data.result.items.forEach(item => {
+                            const uin = item.uin;
+                            if (!productsByUin.has(uin)) {
+                                productsByUin.set(uin, []);
+                            }
+                            productsByUin.get(uin).push(item);
+                        });
+
+                        // incremental update
+                        const discountedProducts = processDiscounts(productsByUin);
+                        displayProducts(discountedProducts);
+
+                        const perPage = data.result.items.length;
+                        const total = data.result.products_total;
+                        hasMore = page * perPage < total;
+                        page++;
+                    } catch (err) {
+                        console.error(err);
+                        hasMore = false;
+                    }
+                }
+            }
+
+            const discountedProducts = processDiscounts(productsByUin);
+            displayProducts(discountedProducts);
+            progressDiv.textContent = `נמצאו ${discountedProducts.length} מוצרים בהנחה`;
+        }
+
+        function processDiscounts(productsByUin) {
+            const discountedProducts = [];
+            productsByUin.forEach(items => {
+                let oldPrice = null;
+                let newPrice = null;
+                let productData = items[0];
+
+                items.forEach(i => {
+                    // regular/original price
+                    if (i.price) {
+                        if (!oldPrice || i.price > oldPrice) oldPrice = i.price;
+                    }
+
+                    // sale price (derived from payments)
+                    if (i.payments && i.payments.estimated_payment && i.payments.max_num_payments_wo_interest) {
+                        const derivedSalePrice = i.payments.estimated_payment * i.payments.max_num_payments_wo_interest;
+                        if (!newPrice || derivedSalePrice < newPrice) {
+                            newPrice = derivedSalePrice;
+                        }
+                    }
+                });
+
+                if (oldPrice && newPrice && newPrice < oldPrice) {
+                    const percent = Math.round(((oldPrice - newPrice) / oldPrice) * 100);
+                    discountedProducts.push({
+                        uin: productData.uin,
+                        name: productData.name,
+                        img: productData.img,
+                        oldPrice,
+                        newPrice,
+                        percent
+                    });
+                }
+            });
+
+            discountedProducts.sort((a, b) => b.percent - a.percent);
+            return discountedProducts;
+        }
+
+        function convertToApiUrl(webUrl) {
+            return webUrl.replace("/web/cat/", "/m_action/api/category/") + "&page=";
+        }
+
+        function displayProducts(products) {
+            productsContainer.innerHTML = '';
+            if (products.length === 0) {
+                productsContainer.innerHTML = '<div class="loading">לא נמצאו מוצרים בהנחה</div>';
+                return;
+            }
+
+            products.forEach(p => {
+                const card = document.createElement('a');
+                card.href = `https://ksp.co.il/web/item/${p.uin}`;
+                card.target = "_blank";
+                card.className = 'product-card';
+                card.innerHTML = `
+          <img src="${p.img}" alt="${p.name}" class="product-image">
+          <div class="product-name">${p.name}</div>
+          <div class="product-price">
+            <span class="old-price">₪${p.oldPrice}</span>
+            <span class="new-price">₪${p.newPrice}</span>
+            <span class="discount">-${p.percent}%</span>
+          </div>
+        `;
+                productsContainer.appendChild(card);
+            });
+        }
+    </script>
+</body>
+
+</html>
