@@ -136,11 +136,16 @@
         const urlsInput = document.getElementById("urlsInput");
         const progressDiv = document.getElementById("progress");
         const productsContainer = document.getElementById("productsContainer");
+        const defaultUrls = [
+            "https://ksp.co.il/web/cat/1215?sort=1",
+            "https://ksp.co.il/web/cat/38?sort=1",
+            "https://ksp.co.il/web/cat/28808?sort=1"
+        ].join("\n");
 
         // Restore saved URLs
         document.addEventListener("DOMContentLoaded", () => {
             const saved = localStorage.getItem("kspUrls");
-            if (saved) urlsInput.value = saved;
+            urlsInput.value = saved || defaultUrls;
         });
 
         fetchBtn.addEventListener("click", () => {

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "server.js",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
@@ -17,5 +18,9 @@
   "bugs": {
     "url": "https://github.com/ofirgaash1/KSP/issues"
   },
-  "homepage": "https://github.com/ofirgaash1/KSP#readme"
+  "homepage": "https://github.com/ofirgaash1/KSP#readme",
+  "dependencies": {
+    "express": "^5.1.0",
+    "node-fetch": "^3.3.2"
+  }
 }
