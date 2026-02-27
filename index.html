@@ -141,6 +141,13 @@
             "https://ksp.co.il/web/cat/38?sort=1",
             "https://ksp.co.il/web/cat/28808?sort=1"
         ].join("\n");
+        const REQUEST_DELAY_MS = 350;
+        const RETRY_DELAY_MS = 900;
+        const MAX_RETRIES = 2;
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
 
         // Restore saved URLs
         document.addEventListener("DOMContentLoaded", () => {
@@ -159,11 +166,13 @@
         });
 
         async function fetchAllDiscountedProducts(urls) {
-            productsContainer.innerHTML = '<div class="loading">טוען מוצרים...</div>';
+            productsContainer.innerHTML = "<div class=\"loading\">Loading products...</div>";
             progressDiv.textContent = "";
 
             const productsByUin = new Map();
             let totalPagesFetched = 0;
+            let hadFetchError = false;
+            const errors = [];
 
             for (const url of urls) {
                 const apiBase = convertToApiUrl(url);
@@ -171,11 +180,36 @@
                 let hasMore = true;
 
                 while (hasMore) {
-                    progressDiv.textContent = `טוען ${url} עמוד ${page}... (סה"כ עמודים שנמשכו: ${++totalPagesFetched})`;
+                    progressDiv.textContent = "Loading " + url + " page " + page + "... (total pages fetched: " + (++totalPagesFetched) + ")";
 
                     try {
-                        const response = await fetch(`http://localhost:3000/api/proxy?target=${encodeURIComponent(apiBase + page)}`);
-                        const data = await response.json();
+                        let data = null;
+                        let lastError = null;
+
+                        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+                            try {
+                                const response = await fetch("http://localhost:3000/api/proxy?target=" + encodeURIComponent(apiBase + page));
+                                const payload = await response.json();
+
+                                if (!response.ok || payload.error) {
+                                    const reason = payload.error || ("HTTP " + response.status);
+                                    const blockedHint = payload.blocked ? " (upstream blocked/challenged)" : "";
+                                    throw new Error(reason + blockedHint);
+                                }
+
+                                data = payload;
+                                break;
+                            } catch (attemptErr) {
+                                lastError = attemptErr;
+                                if (attempt < MAX_RETRIES) {
+                                    await sleep(RETRY_DELAY_MS * (attempt + 1));
+                                }
+                            }
+                        }
+
+                        if (!data) {
+                            throw lastError || new Error("Unknown fetch failure");
+                        }
 
                         if (!data.result || !data.result.items || data.result.items.length === 0) {
                             hasMore = false;
@@ -190,7 +224,6 @@
                             productsByUin.get(uin).push(item);
                         });
 
-                        // incremental update
                         const discountedProducts = processDiscounts(productsByUin);
                         displayProducts(discountedProducts);
 
@@ -198,8 +231,11 @@
                         const total = data.result.products_total;
                         hasMore = page * perPage < total;
                         page++;
+                        await sleep(REQUEST_DELAY_MS);
                     } catch (err) {
                         console.error(err);
+                        hadFetchError = true;
+                        errors.push(url + " page " + page + ": " + err.message);
                         hasMore = false;
                     }
                 }
@@ -207,9 +243,12 @@
 
             const discountedProducts = processDiscounts(productsByUin);
             displayProducts(discountedProducts);
-            progressDiv.textContent = `נמצאו ${discountedProducts.length} מוצרים בהנחה`;
+            if (hadFetchError) {
+                progressDiv.textContent = "Found " + discountedProducts.length + " discounted products. Some requests failed: " + errors[0];
+            } else {
+                progressDiv.textContent = "Found " + discountedProducts.length + " discounted products";
+            }
         }
-
         function processDiscounts(productsByUin) {
             const discountedProducts = [];
             productsByUin.forEach(items => {
